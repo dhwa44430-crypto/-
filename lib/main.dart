@@ -29,20 +29,25 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.deepOrange,
         useMaterial3: true,
       ),
-      home: const LoginScreen(),
+      home: const AuthScreen(),
     );
   }
 }
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+class AuthScreen extends StatefulWidget {
+  const AuthScreen({Key? key}) : super(key: key);
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<AuthScreen> createState() => _AuthScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
+  
+  // التحكم بالحالة: هل نحن في وضع تسجيل الدخول أم إنشاء حساب؟
+  bool _isLogin = true;
+  
+  final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -62,7 +67,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _loadBannerAd() {
     _bannerAd = BannerAd(
-      adUnitId: 'ca-app-pub-3940256099942544/6300978111',
+      adUnitId: 'ca-app-pub-3940256099942544/6300978111', // معرف إعلان تجريبي
       request: const AdRequest(),
       size: AdSize.banner,
       listener: BannerAdListener(
@@ -78,7 +83,7 @@ class _LoginScreenState extends State<LoginScreen> {
     )..load();
   }
 
-  Future<void> _handleLogin() async {
+  Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -86,18 +91,43 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final response = await _supabase.auth.signInWithPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      if (response.user != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('تم تسجيل الدخول بنجاح!'),
-            backgroundColor: Colors.green,
-          ),
+      if (_isLogin) {
+        // --- تسجيل الدخول ---
+        final response = await _supabase.auth.signInWithPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
         );
+
+        if (response.user != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم تسجيل الدخول بنجاح!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        // --- إنشاء حساب جديد ---
+        final response = await _supabase.auth.signUp(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+          data: {
+            'username': _usernameController.text.trim(),
+          },
+        );
+
+        if (response.user != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم إنشاء الحساب بنجاح! يمكنك الآن تسجيل الدخول.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          // التحويل تلقائياً لواجهة تسجيل الدخول بعد النجاح
+          setState(() {
+            _isLogin = true;
+          });
+        }
       }
     } on AuthException catch (error) {
       if (mounted) {
@@ -128,6 +158,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _bannerAd?.dispose();
@@ -154,10 +185,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: Colors.deepOrange.shade600,
                   ),
                   const SizedBox(height: 16),
-                  const Text(
-                    'مرحباً بك مجدداً',
+                  Text(
+                    _isLogin ? 'مرحباً بك مجدداً' : 'إنشاء حساب جديد',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.bold,
                       color: Colors.black87,
@@ -165,14 +196,39 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'سجل دخولك لمتابعة قراءة قصصك',
+                    _isLogin
+                        ? 'سجل دخولك لمتابعة قراءة قصصك المفضلة'
+                        : 'أنشئ حسابك وابدأ بتأليف وقراءة القصص',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
                       color: Colors.grey.shade600,
                     ),
                   ),
-                  const SizedBox(height: 36),
+                  const SizedBox(height: 32),
+
+                  // حقل اسم المستخدم (يظهر فقط في إنشاء الحساب)
+                  if (!_isLogin) ...[
+                    TextFormField(
+                      controller: _usernameController,
+                      decoration: InputDecoration(
+                        labelText: 'اسم المستخدم',
+                        prefixIcon: const Icon(Icons.person_outline),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      validator: (value) {
+                        if (!_isLogin && (value == null || value.trim().isEmpty)) {
+                          return 'يرجى إدخال اسم المستخدم';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // حقل البريد الإلكتروني
                   TextFormField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
@@ -188,10 +244,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (value == null || value.trim().isEmpty) {
                         return 'يرجى إدخال البريد الإلكتروني';
                       }
+                      if (!value.contains('@')) {
+                        return 'يرجى إدخال بريد إلكتروني صحيح';
+                      }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
+
+                  // حقل كلمة المرور
                   TextFormField(
                     controller: _passwordController,
                     obscureText: _isPasswordObscured,
@@ -219,14 +280,19 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (value == null || value.trim().isEmpty) {
                         return 'يرجى إدخال كلمة المرور';
                       }
+                      if (value.length < 6) {
+                        return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
+                      }
                       return null;
                     },
                   ),
                   const SizedBox(height: 24),
+
+                  // زر الإرسال (تسجيل الدخول / إنشاء الحساب)
                   SizedBox(
                     height: 50,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _handleLogin,
+                      onPressed: _isLoading ? null : _submitForm,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.deepOrange.shade600,
                         shape: RoundedRectangleBorder(
@@ -242,9 +308,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 strokeWidth: 2,
                               ),
                             )
-                          : const Text(
-                              'تسجيل الدخول',
-                              style: TextStyle(
+                          : Text(
+                              _isLogin ? 'تسجيل الدخول' : 'إنشاء الحساب',
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,
@@ -252,12 +318,39 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+
+                  // زر التبديل بين الواجهتين
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _isLogin ? 'ليس لديك حساب؟' : 'لديك حساب بالفعل؟',
+                        style: TextStyle(color: Colors.grey.shade700),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _isLogin = !_isLogin;
+                          });
+                        },
+                        child: Text(
+                          _isLogin ? 'إنشاء حساب جديد' : 'تسجيل الدخول',
+                          style: TextStyle(
+                            color: Colors.deepOrange.shade600,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
           ),
         ),
       ),
+      // إعلان AdMob بأسفل الشاشة
       bottomNavigationBar: _isAdLoaded && _bannerAd != null
           ? SizedBox(
               width: _bannerAd!.size.width.toDouble(),
